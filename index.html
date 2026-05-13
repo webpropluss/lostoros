@@ -933,6 +933,18 @@ tbody tr:last-child td{border-bottom:none;}
 
       <!-- Lista socios -->
       <div class="admin-sec">
+        <div class="admin-sec-title">🗂️ Gestionar fotos y reportes</div>
+        <div class="card">
+          <div class="form-group">
+            <label class="form-label">Seleccionar socio</label>
+            <select class="form-select" id="gestionSocioId" onchange="cargarGestionSocio()"></select>
+          </div>
+          <div id="gestionContenido" style="margin-top:14px;"></div>
+        </div>
+      </div>
+
+      <!-- Socios registrados -->
+      <div class="admin-sec">
         <div class="admin-sec-title">📋 Socios registrados</div>
         <div class="card">
           <div class="tbl-wrap">
@@ -1006,16 +1018,7 @@ const PREDS={
 };
 const ADMIN_PIN='1234';
 
-let socios=[
-  {id:1,name:'Carlos Mendoza',ci:'12345678',pin:'1111',animales:80,lote:'Lote A-01',obs:'Inversión en torillos Nelore',status:'active',
-   reporte:{pesaje:[{lote:'A-01-T1',cat:'TORILLOS',cant:40,peso:280,precio:850},{lote:'A-01-T2',cat:'TORILLOS',cant:40,peso:295,precio:880}],fotos:['🐂','🐄','🐂','🐄']},galeria:[]},
-  {id:2,name:'María Torres',ci:'87654321',pin:'2222',animales:45,lote:'Lote B-02',obs:'Vacas preñadas importadas',status:'active',
-   reporte:{pesaje:[{lote:'B-02-V1',cat:'VACAS',cant:25,peso:380,precio:1100},{lote:'B-02-V2',cat:'VACAS',cant:20,peso:360,precio:980}],fotos:['🐄','🐄','🐄']},galeria:[]},
-  {id:3,name:'Roberto Arias',ci:'11223344',pin:'3333',animales:30,lote:'Lote C-05',obs:'Vaquillas raza Brangus',status:'active',
-   reporte:{pesaje:[{lote:'C-05-VQ',cat:'VAQUILLAS',cant:30,peso:240,precio:720}],fotos:['🐄','🐄']},galeria:[]},
-  {id:4,name:'Laura Gutiérrez',ci:'44332211',pin:'4444',animales:60,lote:'Lote D-03',obs:'Torete y torillos mixtos',status:'pending',
-   reporte:{pesaje:[{lote:'D-03-TR',cat:'TORETE',cant:20,peso:350,precio:1200},{lote:'D-03-T',cat:'TORILLOS',cant:40,peso:260,precio:780}],fotos:['🐂','🐂','🐂','🐄']},galeria:[]},
-];
+let socios=[]; // Se carga desde Supabase
 let news=[
   {id:1,title:'Torillos Nelore en alza sostenida',desc:'Los precios de torillos mostraron recuperación en el remate de abril. Se espera continúe la tendencia con el inicio de la época seca.',tag:'oportunidad',emoji:'🐂',fecha:'14 Abr 2026'},
   {id:2,title:'Vacas de faena con presión a la baja',desc:'El mercado de vacas registra caída sostenida desde enero. La reducción de pasturas en zonas bajas de Beni podría intensificar la liquidación.',tag:'alerta',emoji:'📉',fecha:'14 Abr 2026'},
@@ -1150,23 +1153,22 @@ function showReport(s){
 }
 
 /* ══ ADMIN ACTIONS ══════════════════════════════════════ */
-function addNews(){
+async function addNews(){
   const t=document.getElementById('newsTitle').value.trim();
   const d=document.getElementById('newsDesc').value.trim();
   if(!t||!d){alert('Completá título y descripción');return;}
   const tag=document.getElementById('newsTag').value;
   const emoji=document.getElementById('newsEmoji').value||'📰';
-  sb.from('noticias').insert([{titulo:t,descripcion:d,tag,emoji}]).then(({error})=>{
-    if(error){alert('Error: '+error.message);return;}
-    news.unshift({id:Date.now(),title:t,desc:d,tag,emoji,fecha:new Date().toLocaleDateString('es-BO',{day:'2-digit',month:'short',year:'numeric'})});
-    renderNews();
-  });
+  const {data:newNews, error:newsErr} = await sb.from('noticias').insert([{titulo:t,descripcion:d,tag,emoji}]).select().single();
+  if(newsErr){alert('Error: '+newsErr.message);return;}
+  news.unshift({id:newNews.id,title:t,desc:d,tag,emoji,fecha:new Date().toLocaleDateString('es-BO',{day:'2-digit',month:'short',year:'numeric'})});
+  renderNews();
   ['newsTitle','newsDesc','newsEmoji'].forEach(id=>document.getElementById(id).value='');
   renderNews();
   alert('✅ Noticia publicada.');
 }
 
-function addSocio(){
+async function addSocio(){
   const name=document.getElementById('socioName').value.trim();
   const ci=document.getElementById('socioCI').value.trim();
   const pin=document.getElementById('socioPin').value.trim();
@@ -1210,8 +1212,10 @@ async function addReporte(){
   renderAdminAll();
 }
 
-function deleteSocio(id){
+async function deleteSocio(id){
   if(!confirm('¿Eliminar este socio?'))return;
+  const {error} = await sb.from('socios').delete().eq('id',id);
+  if(error){alert('Error: '+error.message);return;}
   socios=socios.filter(s=>s.id!==id);
   renderPartners();renderAdminAll();
 }
@@ -1298,7 +1302,7 @@ function renderTable(){
 
 function renderAdminAll(){
   // Socio selects
-  ['reporteSocioId','galeriaSocioId'].forEach(selId => {
+  ['reporteSocioId','galeriaSocioId','gestionSocioId'].forEach(selId => {
     const sel = document.getElementById(selId);
     if(!sel) return;
     sel.innerHTML = '';
@@ -1560,6 +1564,86 @@ function renderAnalisis(){
       <div style="font-size:0.67rem;color:var(--text);line-height:1.5;border-top:1px solid var(--border);padding-top:8px;">${a.recomendacion}</div>`;
     c.appendChild(el);
   });
+}
+
+/* ══ GESTIONAR FOTOS Y REPORTES (ADMIN) ═══════════════ */
+async function cargarGestionSocio(){
+  const sid = document.getElementById('gestionSocioId').value;
+  const s = socios.find(x=>x.id===sid);
+  const el = document.getElementById('gestionContenido');
+  if(!s){ el.innerHTML=''; return; }
+
+  el.innerHTML='<div style="color:var(--text2);font-size:0.85rem;padding:10px 0;">⏳ Cargando...</div>';
+
+  // Load from Supabase
+  const [{data:reportesDB},{data:galeriaDB}] = await Promise.all([
+    sb.from('reportes').select('*').eq('socio_id',sid).order('fecha',{ascending:true}),
+    sb.from('galeria').select('*').eq('socio_id',sid).order('created_at',{ascending:false})
+  ]);
+
+  // Build reportes table
+  const repRows = reportesDB && reportesDB.length ? reportesDB.map(r=>`
+    <tr>
+      <td style="font-size:0.78rem;color:var(--text2)">${r.fecha}</td>
+      <td>${r.lote}</td>
+      <td><span class="badge ${badgeCls(r.categoria)}">${r.categoria}</span></td>
+      <td>${r.cantidad} cab. · ${r.peso} kg</td>
+      <td style="font-size:0.73rem;color:var(--text2)">${r.obs||'—'}</td>
+      <td><button class="btn btn-danger btn-sm" onclick="eliminarReporte('${r.id}','${sid}')">🗑 Eliminar</button></td>
+    </tr>`).join('') : '<tr><td colspan="6" style="color:var(--text3);text-align:center;padding:12px;">Sin reportes</td></tr>';
+
+  // Build galeria grid
+  const fotoCards = galeriaDB && galeriaDB.length ? galeriaDB.map(g=>`
+    <div style="border-radius:8px;overflow:hidden;border:1px solid var(--border);position:relative;">
+      <img src="${g.foto_url}" style="width:100%;height:130px;object-fit:cover;display:block;">
+      <div style="padding:8px 10px;background:#fff;">
+        <div style="font-weight:700;font-size:0.8rem;color:var(--verde3);">${g.titulo}</div>
+        <div style="font-size:0.68rem;color:var(--text2);">📅 ${g.fecha}</div>
+        <button class="btn btn-danger btn-sm" style="margin-top:6px;width:100%;" onclick="eliminarFoto('${g.id}','${g.foto_url}','${sid}')">🗑 Eliminar foto</button>
+      </div>
+    </div>`).join('') : '<div style="color:var(--text3);font-size:0.8rem;padding:10px 0;">Sin fotos</div>';
+
+  el.innerHTML=`
+    <div style="font-size:0.7rem;font-weight:800;text-transform:uppercase;letter-spacing:1.5px;color:var(--verde3);margin-bottom:10px;">⚖️ Reportes de pesaje</div>
+    <div class="tbl-wrap" style="margin-bottom:18px;">
+      <table>
+        <thead><tr><th>Fecha</th><th>Lote</th><th>Cat.</th><th>Detalle</th><th>Obs.</th><th>Acción</th></tr></thead>
+        <tbody>${repRows}</tbody>
+      </table>
+    </div>
+    <div style="font-size:0.7rem;font-weight:800;text-transform:uppercase;letter-spacing:1.5px;color:var(--verde3);margin-bottom:10px;">📷 Galería de fotos</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px;">${fotoCards}</div>
+    <div id="gestionAlert" style="margin-top:10px;"></div>
+  `;
+}
+
+async function eliminarReporte(reporteId, socioId){
+  if(!confirm('¿Eliminar este reporte de pesaje?')) return;
+  const {error} = await sb.from('reportes').delete().eq('id', reporteId);
+  if(error){ alert('Error: '+error.message); return; }
+  // Reload
+  await cargarGestionSocio();
+  // Update local socio data
+  const s = socios.find(x=>x.id===socioId);
+  if(s) await cargarDatosSocio(socioId);
+}
+
+async function eliminarFoto(galeriaId, fotoUrl, socioId){
+  if(!confirm('¿Eliminar esta foto?')) return;
+  // Delete from Storage (extract path from URL)
+  try {
+    const urlParts = fotoUrl.split('/galeria-socios/');
+    if(urlParts[1]){
+      await sb.storage.from('galeria-socios').remove([decodeURIComponent(urlParts[1])]);
+    }
+  } catch(e){ console.warn('Storage delete:', e); }
+  // Delete from DB
+  const {error} = await sb.from('galeria').delete().eq('id', galeriaId);
+  if(error){ alert('Error: '+error.message); return; }
+  // Reload
+  await cargarGestionSocio();
+  const s = socios.find(x=>x.id===socioId);
+  if(s) await cargarDatosSocio(socioId);
 }
 
 /* ══ GALERÍA DE SEGUIMIENTO ════════════════════════════ */
