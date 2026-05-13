@@ -1047,7 +1047,7 @@ const initials=name=>name.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCas
 const badgeCls=cat=>({TORILLOS:'bg',VAQUILLAS:'bb',VACAS:'by',TOROS:'br',TORETE:'bt'}[cat]||'bg');
 
 /* ══ NAVIGATION ═════════════════════════════════════════ */
-function goTo(page){
+async function goTo(page){
   if(page==='admin'&&!adminUnlocked){openAdminPin();return;}
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
   document.getElementById('page-'+page).classList.add('active');
@@ -1056,7 +1056,14 @@ function goTo(page){
   document.getElementById('topbarTitle').textContent={dashboard:'Socio Inversor',noticias:'Noticias & Propiedad',tendencias:'Mercado',analisis:'Análisis de Inversión',socios:'Portal Socios',admin:'Panel Admin'}[page]||page;
   if(page==='tendencias')setTimeout(renderCharts,80);
   if(page==='analisis')renderAnalisis();
-  if(page==='admin')renderAdminAll();
+  if(page==='admin'){
+    // Reload socios from Supabase to ensure UUIDs are correct
+    const {data:sociosDB} = await sb.from('socios').select('*').order('name');
+    if(sociosDB && sociosDB.length){
+      socios = sociosDB.map(s=>({...s,reporte:{pesaje:[]},galeria:[]}));
+    }
+    renderAdminAll();
+  }
   if(page==='socios')resetSocioSearch();
   closeSidebar();
 }
@@ -1090,14 +1097,14 @@ function logoutAdmin(){adminUnlocked=false;goTo('dashboard');}
 
 function openPartnerPin(id){
   selectedPartnerId=id;
-  const s=socios.find(x=>x.id===id);
+  const s=socios.find(x=>String(x.id)===String(id));
   document.getElementById('partnerPinTitle').textContent='🔑 '+s.name;
   document.getElementById('partnerPinErr').textContent='';
   makePins('partnerPinRow');
   document.getElementById('overlayPartnerPin').classList.add('active');
 }
 function checkPartnerPin(){
-  const s=socios.find(x=>x.id===selectedPartnerId);
+  const s=socios.find(x=>String(x.id)===String(selectedPartnerId));
   if(s&&getPin('partnerPinRow')===s.pin){closeModal('overlayPartnerPin');showReport(s);}
   else{document.getElementById('partnerPinErr').textContent='PIN incorrecto.';makePins('partnerPinRow');}
 }
@@ -1185,8 +1192,8 @@ async function addSocio(){
 }
 
 async function addReporte(){
-  const sid=parseInt(document.getElementById('reporteSocioId').value);
-  const s=socios.find(x=>x.id===sid);
+  const sid=document.getElementById('reporteSocioId').value;
+  const s=socios.find(x=>String(x.id)===String(sid));
   if(!s){alert('Seleccioná un socio');return;}
   const lote=document.getElementById('reporteLote').value.trim();
   const cat=document.getElementById('reporteCat').value;
@@ -1216,7 +1223,7 @@ async function deleteSocio(id){
   if(!confirm('¿Eliminar este socio?'))return;
   const {error} = await sb.from('socios').delete().eq('id',id);
   if(error){alert('Error: '+error.message);return;}
-  socios=socios.filter(s=>s.id!==id);
+  socios=socios.filter(s=>String(s.id)!==String(id));
   renderPartners();renderAdminAll();
 }
 
@@ -1316,7 +1323,7 @@ function renderAdminAll(){
   const tb=document.getElementById('adminSociosTable');if(!tb)return;tb.innerHTML='';
   socios.forEach(s=>{
     const row=document.createElement('tr');
-    row.innerHTML=`<td><strong>${s.name}</strong></td><td style="font-family:'JetBrains Mono',monospace;font-size:0.8rem">${s.ci||'—'}</td><td>${s.lote||'—'}</td><td>${s.animales}</td><td><span class="badge ${s.status==='active'?'bg':'by'}">${s.status==='active'?'Activo':'Pendiente'}</span></td><td style="white-space:nowrap;"><button class="btn btn-ghost btn-sm" onclick="openPartnerPin(${s.id})">Ver</button> <button class="btn btn-danger btn-sm" onclick="deleteSocio(${s.id})">Eliminar</button></td>`;
+    row.innerHTML=`<td><strong>${s.name}</strong></td><td style="font-family:'JetBrains Mono',monospace;font-size:0.8rem">${s.ci||'—'}</td><td>${s.lote||'—'}</td><td>${s.animales}</td><td><span class="badge ${s.status==='active'?'bg':'by'}">${s.status==='active'?'Activo':'Pendiente'}</span></td><td style="white-space:nowrap;"><button class="btn btn-ghost btn-sm" onclick="openPartnerPin('${s.id}')">Ver</button> <button class="btn btn-danger btn-sm" onclick="deleteSocio('${s.id}')">Eliminar</button></td>`;
     tb.appendChild(row);
   });
 }
@@ -1569,7 +1576,7 @@ function renderAnalisis(){
 /* ══ GESTIONAR FOTOS Y REPORTES (ADMIN) ═══════════════ */
 async function cargarGestionSocio(){
   const sid = document.getElementById('gestionSocioId').value;
-  const s = socios.find(x=>x.id===sid);
+  const s = socios.find(x=>String(x.id)===String(sid));
   const el = document.getElementById('gestionContenido');
   if(!s){ el.innerHTML=''; return; }
 
@@ -1663,7 +1670,7 @@ function previewGaleriaImg(input){
 }
 
 async function subirFotoGaleria(){
-  const sid = parseInt(document.getElementById('galeriaSocioId').value);
+  const sid = document.getElementById('galeriaSocioId').value;
   const title = document.getElementById('galeriaTitle').value.trim();
   const desc = document.getElementById('galeriaDesc').value.trim();
   const alertEl = document.getElementById('galeriaAlert');
@@ -1672,7 +1679,7 @@ async function subirFotoGaleria(){
   if(!title){ alertEl.innerHTML='<div class="alert alert-err">Ingresá un título para la foto.</div>'; return; }
   if(!galeriaImgB64){ alertEl.innerHTML='<div class="alert alert-err">Seleccioná una imagen.</div>'; return; }
 
-  const s = socios.find(x => x.id === sid);
+  const s = socios.find(x => String(x.id) === String(sid));
   if(!s) return;
   if(!s.galeria) s.galeria = [];
 
