@@ -1182,7 +1182,7 @@ function addSocio(){
 
 }
 
-function addReporte(){
+async function addReporte(){
   const sid=parseInt(document.getElementById('reporteSocioId').value);
   const s=socios.find(x=>x.id===sid);
   if(!s){alert('Seleccioná un socio');return;}
@@ -1201,9 +1201,8 @@ function addReporte(){
     : new Date().toLocaleDateString('es-BO',{day:'2-digit',month:'short',year:'numeric'});
   const fechaISO = fechaRaw || new Date().toISOString().split('T')[0];
   // Guardar en Supabase
-  sb.from('reportes').insert([{socio_id:s.id,lote,categoria:cat,cantidad:cant,peso,obs,fecha:fechaISO}]).then(({error})=>{
-    if(!error) s.reporte.pesaje.push({lote,cat,cant,peso,obs,fecha,fechaISO});
-  });
+  const {error:repErr} = await sb.from('reportes').insert([{socio_id:s.id,lote,categoria:cat,cantidad:cant,peso,obs,fecha:fechaISO}]);
+  if(repErr){ document.getElementById('reporteAlert').innerHTML='<div class="alert alert-err">Error: '+repErr.message+'</div>'; return; }
   s.reporte.pesaje.push({lote,cat,cant,peso,obs,fecha,fechaISO});
   ['reporteLote','reporteCant','reportePeso','reporteObs','reporteFecha'].forEach(id=>document.getElementById(id).value='');
   document.getElementById('reporteAlert').innerHTML='<div class="alert alert-ok">✅ Reporte guardado para '+s.name+' — '+peso+' kg promedio.</div>';
@@ -1579,7 +1578,7 @@ function previewGaleriaImg(input){
   reader.readAsDataURL(file);
 }
 
-function subirFotoGaleria(){
+async function subirFotoGaleria(){
   const sid = parseInt(document.getElementById('galeriaSocioId').value);
   const title = document.getElementById('galeriaTitle').value.trim();
   const desc = document.getElementById('galeriaDesc').value.trim();
@@ -1596,15 +1595,20 @@ function subirFotoGaleria(){
   const fecha = new Date().toLocaleDateString('es-BO',{day:'2-digit',month:'short',year:'numeric'});
   // Subir imagen a Supabase Storage
   const file = document.getElementById('galeriaFile').files[0];
-  const path = s.id+'/'+Date.now()+'.'+file.name.split('.').pop();
-  sb.storage.from('galeria-socios').upload(path, file).then(({error:upErr})=>{
-    if(upErr){alert('Error subiendo imagen: '+upErr.message);return;}
-    const {data:{publicUrl}} = sb.storage.from('galeria-socios').getPublicUrl(path);
-    sb.from('galeria').insert([{socio_id:s.id,titulo:title,descripcion:desc,foto_url:publicUrl,fecha:new Date().toISOString().split('T')[0]}]).then(()=>{
-      s.galeria.push({img:publicUrl,title,desc,fecha:new Date().toLocaleDateString('es-BO',{day:'2-digit',month:'short',year:'numeric'})});
-    });
-  });
-  s.galeria.push({ img: galeriaImgB64, title, desc, fecha });
+  const ext = file.name.split('.').pop();
+  const path = s.id+'/'+Date.now()+'.'+ext;
+  const alertEl2 = document.getElementById('galeriaAlert');
+  alertEl2.innerHTML='<div class="alert alert-ok">⏳ Subiendo imagen...</div>';
+  
+  const {error:upErr} = await sb.storage.from('galeria-socios').upload(path, file, {cacheControl:'3600',upsert:false});
+  if(upErr){ alertEl2.innerHTML='<div class="alert alert-err">Error subiendo: '+upErr.message+'</div>'; return; }
+  
+  const {data:{publicUrl}} = sb.storage.from('galeria-socios').getPublicUrl(path);
+  const fechaHoy = new Date().toISOString().split('T')[0];
+  const {error:dbErr} = await sb.from('galeria').insert([{socio_id:s.id,titulo:title,descripcion:desc,foto_url:publicUrl,fecha:fechaHoy}]);
+  if(dbErr){ alertEl2.innerHTML='<div class="alert alert-err">Error guardando: '+dbErr.message+'</div>'; return; }
+  
+  s.galeria.unshift({img:publicUrl,title,desc,fecha:new Date().toLocaleDateString('es-BO',{day:'2-digit',month:'short',year:'numeric'})});
 
   // Reset form
   document.getElementById('galeriaTitle').value = '';
@@ -1635,29 +1639,76 @@ function resetSocioSearch(){
   if(rv)rv.style.display='none';
 }
 
-// ══ CARGAR DATOS DE SUPABASE AL INICIAR ══════════
+// ══ SUPABASE: CARGA COMPLETA DE DATOS ═══════════
 async function cargarDatos(){
   try {
-    const [{data:sociosDB},{data:noticiasDB},{data:rematesDB}] = await Promise.all([
+    const [{data:sociosDB},{data:noticiasDB}] = await Promise.all([
       sb.from('socios').select('*').order('name'),
       sb.from('noticias').select('*').order('created_at',{ascending:false}),
-      sb.from('remates').select('*').order('fecha')
     ]);
     if(sociosDB && sociosDB.length){
       socios = sociosDB.map(s=>({...s,reporte:{pesaje:[]},galeria:[]}));
     }
     if(noticiasDB && noticiasDB.length){
-      news = noticiasDB.map(n=>({id:n.id,title:n.titulo,desc:n.descripcion,tag:n.tag,emoji:n.emoji,fecha:new Date(n.created_at).toLocaleDateString('es-BO',{day:'2-digit',month:'short',year:'numeric'})}));
+      news = noticiasDB.map(n=>({
+        id:n.id,title:n.titulo,desc:n.descripcion,
+        tag:n.tag,emoji:n.emoji,
+        fecha:new Date(n.created_at).toLocaleDateString('es-BO',{day:'2-digit',month:'short',year:'numeric'})
+      }));
     }
-  } catch(e){ console.warn('Supabase no conectado, usando datos locales'); }
+  } catch(e){ console.warn('Usando datos locales:', e.message); }
   renderSeason();renderStats();renderNews();renderPartners();renderTable();
   buildCarousel();
 }
+
+// ══ CARGAR REPORTES Y GALERÍA DEL SOCIO DESDE SUPABASE ══
+async function cargarDatosSocio(socioId){
+  try {
+    const [{data:reportesDB},{data:galeriaDB}] = await Promise.all([
+      sb.from('reportes').select('*').eq('socio_id', socioId).order('fecha',{ascending:true}),
+      sb.from('galeria').select('*').eq('socio_id', socioId).order('created_at',{ascending:false})
+    ]);
+    const s = socios.find(x=>x.id===socioId);
+    if(!s) return;
+    if(reportesDB){
+      s.reporte.pesaje = reportesDB.map(r=>({
+        lote: r.lote, cat: r.categoria,
+        cant: r.cantidad, peso: r.peso,
+        obs: r.obs||'', 
+        fecha: new Date(r.fecha+'T12:00:00').toLocaleDateString('es-BO',{day:'2-digit',month:'short',year:'numeric'}),
+        fechaISO: r.fecha
+      }));
+    }
+    if(galeriaDB){
+      s.galeria = galeriaDB.map(g=>({
+        img: g.foto_url,
+        title: g.titulo,
+        desc: g.descripcion||'',
+        fecha: new Date(g.fecha+'T12:00:00').toLocaleDateString('es-BO',{day:'2-digit',month:'short',year:'numeric'})
+      }));
+    }
+  } catch(e){ console.warn('Error cargando datos del socio:', e.message); }
+}
+
 cargarDatos();
 
-function buscarSocio(){
+async function buscarSocio(){
   const ci = document.getElementById('ciInput').value.trim();
-  const s = socios.find(x => x.ci === ci);
+  // First try local, then Supabase
+  let s = socios.find(x => x.ci === ci);
+  if(!s){
+    // Try loading from Supabase directly
+    try {
+      const {data} = await sb.from('socios').select('id,name,ci,animales,lote,obs,status').eq('ci',ci).single();
+      if(data){
+        // Add to local if not present
+        if(!socios.find(x=>x.id===data.id)){
+          socios.push({...data, reporte:{pesaje:[]}, galeria:[]});
+        }
+        s = socios.find(x=>x.id===data.id);
+      }
+    } catch(e){}
+  }
   if(!s){
     document.getElementById('ciError').style.display='block';
     return;
