@@ -1129,7 +1129,7 @@ async function goTo(page){
   if(page==='tendencias')setTimeout(renderCharts,80);
   if(page==='analisis')renderAnalisis();
   if(page==='admin'){
-    // Reload socios from Supabase to ensure UUIDs are correct
+    // Reload socios from Supabase with full data (including pin)
     const {data:sociosDB} = await sb.from('socios').select('*').order('name');
     if(sociosDB && sociosDB.length){
       socios = sociosDB.map(s=>({...s,reporte:{pesaje:[]},galeria:[]}));
@@ -1889,27 +1889,39 @@ cargarDatos();
 
 async function buscarSocio(){
   const ci = document.getElementById('ciInput').value.trim();
-  // First try local, then Supabase
-  let s = socios.find(x => x.ci === ci);
+  if(!ci){ document.getElementById('ciError').style.display='block'; return; }
+
+  // Try local memory first (only if pin is loaded)
+  let s = socios.find(x => x.ci === ci && x.pin);
+
   if(!s){
-    // Try loading from Supabase directly
+    // Load fresh from Supabase — including pin
     try {
-      const {data} = await sb.from('socios').select('id,name,ci,animales,lote,obs,status').eq('ci',ci).single();
-      if(data){
-        // Add to local if not present
-        if(!socios.find(x=>x.id===data.id)){
-          socios.push({...data, reporte:{pesaje:[]}, galeria:[]});
-        }
-        s = socios.find(x=>x.id===data.id);
+      const {data, error} = await sb.from('socios').select('*').eq('ci', ci).single();
+      if(error || !data){
+        document.getElementById('ciError').style.display='block';
+        return;
       }
-    } catch(e){}
+      // Update or add to local array with full data (including pin)
+      const idx = socios.findIndex(x => x.id === data.id);
+      if(idx >= 0){
+        socios[idx] = {...socios[idx], ...data};
+      } else {
+        socios.push({...data, reporte:{pesaje:[]}, galeria:[]});
+      }
+      s = socios.find(x => x.id === data.id);
+    } catch(e){
+      document.getElementById('ciError').style.display='block';
+      return;
+    }
   }
+
   if(!s){
     document.getElementById('ciError').style.display='block';
     return;
   }
+
   portalSocioId = s.id;
-  // show found card
   document.getElementById('socioFoundCard').innerHTML=`
     <div style="display:flex;align-items:center;gap:14px;">
       <div style="width:52px;height:52px;border-radius:50%;background:linear-gradient(135deg,var(--verde),var(--verde2));
@@ -1932,14 +1944,22 @@ function clearCiError(){
   document.getElementById('ciError').style.display='none';
 }
 
-function checkSocioPortalPin(){
+async function checkSocioPortalPin(){
   const s = socios.find(x=>x.id===portalSocioId);
   const pin = getPin('socioPortalPinRow');
   if(s && pin===s.pin){
+    // Show loading state
     document.getElementById('socioFoundView').style.display='none';
     document.getElementById('socioReportView').style.display='block';
-    document.getElementById('reportViewName').textContent='📋 Reporte de '+s.name;
-    renderSocioReport(s);
+    document.getElementById('reportViewName').textContent='⏳ Cargando reporte...';
+    document.getElementById('socioReportContent').innerHTML='<div style="text-align:center;padding:40px;color:var(--text2);font-size:0.85rem;">⏳ Cargando tus datos desde la base de datos...</div>';
+
+    // Load fresh data from Supabase
+    await cargarDatosSocio(s.id);
+    const fresh = socios.find(x=>x.id===portalSocioId) || s;
+
+    document.getElementById('reportViewName').textContent='📋 Reporte de '+fresh.name;
+    renderSocioReport(fresh);
   } else {
     document.getElementById('socioPortalPinErr').style.display='block';
     makePins('socioPortalPinRow');
@@ -2007,7 +2027,11 @@ function renderSocioReport(s){
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
         ${s.galeria.slice().reverse().map((g,i,arr)=>`
           <div class="galeria-thumb" style="border-radius:10px;overflow:hidden;border:1px solid var(--border);box-shadow:0 2px 8px rgba(0,0,0,0.08);" onclick="openLightbox(_currentGaleria,${i})">
-            <img src="${g.img}" alt="${g.title}" style="width:100%;height:160px;object-fit:cover;display:block;">
+            <img src="${g.img}" alt="${g.title}" style="width:100%;height:160px;object-fit:cover;display:block;" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
+            <div style="display:none;width:100%;height:160px;align-items:center;justify-content:center;flex-direction:column;gap:6px;background:var(--bg3);">
+              <div style="font-size:1.8rem;">🔒</div>
+              <div style="font-size:0.65rem;color:var(--text3);text-align:center;padding:0 10px;">Foto no disponible<br>(bucket privado en Supabase)</div>
+            </div>
             <div style="padding:10px 12px;background:#fff;">
               <div style="font-family:'Montserrat',sans-serif;font-weight:800;font-size:0.8rem;color:var(--verde3);margin-bottom:3px;">${g.title}</div>
               ${g.desc?`<div style="font-size:0.7rem;color:var(--text2);line-height:1.5;margin-bottom:5px;">${g.desc}</div>`:''}
