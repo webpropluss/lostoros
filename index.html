@@ -424,12 +424,84 @@ tbody tr:last-child td{border-bottom:none;}
   .partner-grid{grid-template-columns:1fr;}
   .grid-5{grid-template-columns:1fr 1fr;}
 }
+
+/* ─── LIGHTBOX ─── */
+.lightbox{
+  display:none;position:fixed;inset:0;z-index:900;
+  background:rgba(0,0,0,.92);
+  align-items:center;justify-content:center;
+  padding:16px;backdrop-filter:blur(6px);
+  cursor:zoom-out;
+}
+.lightbox.active{display:flex;}
+.lightbox-inner{
+  position:relative;max-width:92vw;max-height:90vh;
+  display:flex;flex-direction:column;align-items:center;gap:12px;
+  cursor:default;
+}
+.lightbox-img{
+  max-width:100%;max-height:75vh;
+  border-radius:10px;object-fit:contain;
+  box-shadow:0 8px 48px rgba(0,0,0,.6);
+  display:block;
+}
+.lightbox-caption{
+  text-align:center;color:#fff;
+}
+.lightbox-caption strong{
+  font-family:'Montserrat',sans-serif;font-size:1rem;font-weight:800;display:block;margin-bottom:3px;
+}
+.lightbox-caption span{font-size:0.78rem;color:rgba(255,255,255,.65);}
+.lightbox-close{
+  position:fixed;top:16px;right:20px;
+  background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.3);
+  color:#fff;font-size:1.4rem;line-height:1;
+  width:40px;height:40px;border-radius:50%;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;
+  transition:background .15s;z-index:901;
+}
+.lightbox-close:hover{background:rgba(255,255,255,.3);}
+.lightbox-nav{
+  position:fixed;top:50%;transform:translateY(-50%);
+  background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.3);
+  color:#fff;font-size:1.5rem;width:44px;height:44px;border-radius:50%;
+  cursor:pointer;display:flex;align-items:center;justify-content:center;
+  transition:background .15s;z-index:901;
+}
+.lightbox-nav:hover{background:rgba(255,255,255,.3);}
+.lightbox-prev{left:12px;}
+.lightbox-next{right:12px;}
+.lightbox-counter{
+  position:fixed;top:18px;left:50%;transform:translateX(-50%);
+  color:rgba(255,255,255,.7);font-size:0.72rem;font-weight:700;
+  letter-spacing:1px;text-transform:uppercase;z-index:901;
+}
+.galeria-thumb{
+  cursor:zoom-in;transition:transform .15s,box-shadow .15s;
+}
+.galeria-thumb:hover{transform:scale(1.03);box-shadow:0 6px 20px rgba(0,0,0,0.25);}
 </style>
 </head>
 <body>
 
 <!-- SIDEBAR OVERLAY -->
 <div class="sb-overlay" id="sbOverlay" onclick="closeSidebar()"></div>
+
+<!-- ══ LIGHTBOX ══ -->
+<div class="lightbox" id="lightbox" onclick="closeLightbox(event)">
+  <button class="lightbox-close" onclick="event.stopPropagation();document.getElementById('lightbox').classList.remove('active');document.body.style.overflow='';document.removeEventListener('keydown',_lbKey);">✕</button>
+  <button class="lightbox-nav lightbox-prev" onclick="lightboxNav(-1,event)">‹</button>
+  <button class="lightbox-nav lightbox-next" onclick="lightboxNav(1,event)">›</button>
+  <div class="lightbox-counter" id="lightboxCounter"></div>
+  <div class="lightbox-inner" onclick="event.stopPropagation()">
+    <img class="lightbox-img" id="lightboxImg" src="" alt="">
+    <div class="lightbox-caption">
+      <strong id="lightboxTitle"></strong>
+      <span id="lightboxDesc"></span>
+      <span id="lightboxFecha" style="display:block;margin-top:2px;font-size:0.68rem;color:rgba(255,255,255,.45);"></span>
+    </div>
+  </div>
+</div>
 
 <!-- ══ SIDEBAR ══ -->
 <aside class="sidebar" id="sidebar">
@@ -1110,51 +1182,50 @@ function checkPartnerPin(){
 }
 function closeModal(id){document.getElementById(id).classList.remove('active');}
 
-/* ══ PARTNER REPORT ═════════════════════════════════════ */
-function showReport(s){
-  const fotos=s.reporte.fotos.map(f=>`<div class="photo-box">${f}</div>`).join('');
-  const rows=s.reporte.pesaje.map(r=>`
+/* ══ PARTNER REPORT (Admin preview) ═════════════════════ */
+async function showReport(s){
+  // Load latest data from Supabase
+  await cargarDatosSocio(s.id);
+  // Refresh s from socios array
+  const fresh = socios.find(x=>String(x.id)===String(s.id)) || s;
+  const rows = fresh.reporte.pesaje.map(r=>`
     <tr>
+      <td style="color:var(--text2);font-size:0.78rem">${r.fecha||'—'}</td>
       <td>${r.lote}</td>
       <td><span class="badge ${badgeCls(r.cat)}">${r.cat}</span></td>
       <td>${r.cant}</td>
-      <td>${r.peso} kg</td>
-      <td><strong>${r.precio} USD</strong></td>
-      <td>${(r.cant*r.precio).toLocaleString()} USD</td>
+      <td><strong>${r.peso} kg</strong></td>
+      <td style="color:var(--text2);font-size:0.78rem">${r.obs||'—'}</td>
     </tr>`).join('');
-  const total=s.reporte.pesaje.reduce((a,r)=>a+r.cant*r.precio,0);
-  const sinReporte=s.reporte.pesaje.length===0;
+  const sinReporte = fresh.reporte.pesaje.length===0;
+  const fotoCards = fresh.galeria && fresh.galeria.length ? fresh.galeria.map(g=>`
+    <div style="border-radius:8px;overflow:hidden;border:1px solid var(--border);">
+      <img src="${g.img}" style="width:100%;height:110px;object-fit:cover;display:block;">
+      <div style="padding:8px;"><div style="font-weight:700;font-size:0.78rem;color:var(--verde3)">${g.title}</div>
+      <div style="font-size:0.65rem;color:var(--text2)">📅 ${g.fecha}</div></div>
+    </div>`).join('') : '<div style="color:var(--text3);font-size:0.78rem;">Sin fotos aún</div>';
 
   document.getElementById('reportContent').innerHTML=`
     <div class="report-hdr">
-      <div class="report-av">${initials(s.name)}</div>
+      <div class="report-av">${initials(fresh.name)}</div>
       <div>
-        <div class="report-name">${s.name}</div>
+        <div class="report-name">${fresh.name}</div>
         <div class="report-meta">
-          📦 ${s.lote||'—'} &nbsp;·&nbsp; 🐄 ${s.animales} animales<br>
-          <span class="badge ${s.status==='active'?'bg':'by'}" style="margin-top:4px;">${s.status==='active'?'Activo':'Pendiente'}</span>
-          ${s.obs?`<br><span style="color:var(--text3)">${s.obs}</span>`:''}
+          🪪 CI: ${fresh.ci} &nbsp;·&nbsp; 📦 ${fresh.lote||'—'} &nbsp;·&nbsp; 🐄 ${fresh.animales} animales<br>
+          <span class="badge ${fresh.status==='active'?'bg':'by'}" style="margin-top:4px;display:inline-block">${fresh.status==='active'?'Activo':'Pendiente'}</span>
+          ${fresh.obs?`<br><span style="color:var(--text3)">${fresh.obs}</span>`:''}
         </div>
       </div>
     </div>
-
-    <div style="font-size:0.62rem;font-weight:700;text-transform:uppercase;letter-spacing:2px;color:var(--text2);margin-bottom:10px;">📷 Fotos de animales</div>
-    ${s.reporte.fotos.length?`<div class="photos-grid">${fotos}</div>`:'<div style="color:var(--text3);font-size:0.75rem;">Sin fotos cargadas aún</div>'}
-
+    <div style="font-size:0.62rem;font-weight:800;text-transform:uppercase;letter-spacing:2px;color:var(--verde3);margin-bottom:10px;">⚖️ Reportes de pesaje</div>
+    ${sinReporte?`<div style="color:var(--text3);font-size:0.78rem;padding:12px 0;text-align:center;">Sin reportes cargados aún.</div>`:`
+    <div class="tbl-wrap"><table>
+      <thead><tr><th>Fecha</th><th>Lote</th><th>Cat.</th><th>Cant.</th><th>Peso</th><th>Obs.</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table></div>`}
     <div class="divider"></div>
-
-    <div style="font-size:0.62rem;font-weight:700;text-transform:uppercase;letter-spacing:2px;color:var(--text2);margin-bottom:10px;">⚖️ Reporte de pesaje y lotes</div>
-    ${sinReporte?`<div style="color:var(--text3);font-size:0.75rem;padding:12px 0;">Sin reportes cargados aún. El administrador agregará la información.</div>`:`
-    <div class="tbl-wrap">
-      <table>
-        <thead><tr><th>Lote</th><th>Categoría</th><th>Cant.</th><th>Peso prom.</th><th>Precio/cab.</th><th>Total est.</th></tr></thead>
-        <tbody>${rows}</tbody>
-      </table>
-    </div>
-    <div class="total-row">
-      <span style="font-size:0.7rem;color:var(--text2);">Valor total estimado:</span>
-      <span class="total-val">${total.toLocaleString()} USD</span>
-    </div>`}
+    <div style="font-size:0.62rem;font-weight:800;text-transform:uppercase;letter-spacing:2px;color:var(--verde3);margin-bottom:10px;">📷 Galería</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:8px;">${fotoCards}</div>
   `;
   document.getElementById('overlayReport').classList.add('active');
 }
@@ -1183,12 +1254,25 @@ async function addSocio(){
   const lote=document.getElementById('socioLote').value.trim();
   const obs=document.getElementById('socioObs').value.trim();
   if(!name||!ci||pin.length!==4){alert('Completá nombre, CI y PIN de 4 dígitos');return;}
-  if(socios.find(s=>s.ci===ci)){alert('Ya existe un socio con esa cédula.');return;}
-  socios.push({id:Date.now(),name,ci,pin,animales,lote,obs,status:'active',reporte:{pesaje:[],fotos:[]}});
-  ['socioName','socioCI','socioPin','socioAnimales','socioLote','socioObs'].forEach(id=>document.getElementById(id).value='');
-  renderAdminAll();
-  alert('✅ Socio "'+name+'" agregado. CI: '+ci);
 
+  // Verificar duplicado en Supabase
+  const {data:existe} = await sb.from('socios').select('id').eq('ci',ci).single();
+  if(existe){alert('Ya existe un socio con esa cédula.');return;}
+
+  // Guardar en Supabase y obtener UUID real
+  const {data:nuevo, error} = await sb
+    .from('socios')
+    .insert([{name,ci,pin,animales,lote,obs,status:'active'}])
+    .select()
+    .single();
+  if(error){alert('Error guardando socio: '+error.message);return;}
+
+  // Agregar a memoria local con UUID de Supabase
+  socios.push({...nuevo, reporte:{pesaje:[]}, galeria:[]});
+  ['socioName','socioCI','socioPin','socioAnimales','socioLote','socioObs'].forEach(id=>document.getElementById(id).value='');
+  renderPartners();
+  renderAdminAll();
+  alert('✅ Socio "'+name+'" guardado en base de datos. CI: '+ci);
 }
 
 async function addReporte(){
@@ -1733,22 +1817,42 @@ function resetSocioSearch(){
 // ══ SUPABASE: CARGA COMPLETA DE DATOS ═══════════
 async function cargarDatos(){
   try {
-    const [{data:sociosDB},{data:noticiasDB}] = await Promise.all([
+    const [resSocios, resNoticias] = await Promise.all([
       sb.from('socios').select('*').order('name'),
-      sb.from('noticias').select('*').order('created_at',{ascending:false}),
+      sb.from('noticias').select('*').order('created_at',{ascending:false})
     ]);
-    if(sociosDB && sociosDB.length){
-      socios = sociosDB.map(s=>({...s,reporte:{pesaje:[]},galeria:[]}));
+
+    if(resSocios.error) console.error('Error socios:', resSocios.error.message);
+    if(resNoticias.error) console.error('Error noticias:', resNoticias.error.message);
+
+    if(resSocios.data && resSocios.data.length){
+      socios = resSocios.data.map(s=>({...s, reporte:{pesaje:[]}, galeria:[]}));
+      console.log('✅ Socios cargados:', socios.length);
+    } else {
+      socios = [];
+      console.log('ℹ️ Sin socios en DB');
     }
-    if(noticiasDB && noticiasDB.length){
-      news = noticiasDB.map(n=>({
-        id:n.id,title:n.titulo,desc:n.descripcion,
-        tag:n.tag,emoji:n.emoji,
+
+    if(resNoticias.data && resNoticias.data.length){
+      news = resNoticias.data.map(n=>({
+        id:n.id, title:n.titulo, desc:n.descripcion,
+        tag:n.tag, emoji:n.emoji,
         fecha:new Date(n.created_at).toLocaleDateString('es-BO',{day:'2-digit',month:'short',year:'numeric'})
       }));
+      console.log('✅ Noticias cargadas:', news.length);
+    } else {
+      news = [];
+      console.log('ℹ️ Sin noticias en DB');
     }
-  } catch(e){ console.warn('Usando datos locales:', e.message); }
-  renderSeason();renderStats();renderNews();renderPartners();renderTable();
+
+  } catch(e){
+    console.error('❌ Error conectando Supabase:', e.message);
+  }
+  renderSeason();
+  renderStats();
+  renderNews();
+  renderPartners();
+  renderTable();
   buildCarousel();
 }
 
@@ -1844,6 +1948,8 @@ function checkSocioPortalPin(){
 
 
 function renderSocioReport(s){
+  // Expose gallery globally so lightbox onclick can reference it
+  window._currentGaleria = s.galeria ? s.galeria.slice().reverse() : [];
   const rows=s.reporte.pesaje.map(r=>`
     <tr>
       <td style="color:var(--text2);font-size:0.72rem;">${r.fecha||'—'}</td>
@@ -1899,13 +2005,13 @@ function renderSocioReport(s){
         📷 Galería de seguimiento — ${s.galeria.length} foto${s.galeria.length>1?'s':''}
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
-        ${s.galeria.slice().reverse().map(g=>`
-          <div style="border-radius:10px;overflow:hidden;border:1px solid var(--border);box-shadow:0 2px 8px rgba(0,0,0,0.08);">
+        ${s.galeria.slice().reverse().map((g,i,arr)=>`
+          <div class="galeria-thumb" style="border-radius:10px;overflow:hidden;border:1px solid var(--border);box-shadow:0 2px 8px rgba(0,0,0,0.08);" onclick="openLightbox(_currentGaleria,${i})">
             <img src="${g.img}" alt="${g.title}" style="width:100%;height:160px;object-fit:cover;display:block;">
             <div style="padding:10px 12px;background:#fff;">
               <div style="font-family:'Montserrat',sans-serif;font-weight:800;font-size:0.8rem;color:var(--verde3);margin-bottom:3px;">${g.title}</div>
               ${g.desc?`<div style="font-size:0.7rem;color:var(--text2);line-height:1.5;margin-bottom:5px;">${g.desc}</div>`:''}
-              <div style="font-size:0.62rem;color:var(--text3);">📅 ${g.fecha}</div>
+              <div style="font-size:0.62rem;color:var(--text3);">📅 ${g.fecha} &nbsp;🔍 Ver completa</div>
             </div>
           </div>`).join('')}
       </div>
@@ -1963,6 +2069,53 @@ function renderSocioReport(s){
   }
 }
 
+
+/* ══ LIGHTBOX ═══════════════════════════════════════════ */
+let _lbGallery = [];
+let _lbIndex   = 0;
+
+function openLightbox(gallery, idx){
+  _lbGallery = gallery;
+  _lbIndex   = idx;
+  _lbRender();
+  document.getElementById('lightbox').classList.add('active');
+  document.body.style.overflow = 'hidden';
+  document.addEventListener('keydown', _lbKey);
+}
+
+function closeLightbox(e){
+  if(e && e.currentTarget !== e.target) return; // only close when clicking backdrop itself
+  document.getElementById('lightbox').classList.remove('active');
+  document.body.style.overflow = '';
+  document.removeEventListener('keydown', _lbKey);
+}
+
+function lightboxNav(dir, e){
+  if(e) e.stopPropagation();
+  _lbIndex = (_lbIndex + dir + _lbGallery.length) % _lbGallery.length;
+  _lbRender();
+}
+
+function _lbRender(){
+  const g = _lbGallery[_lbIndex];
+  document.getElementById('lightboxImg').src    = g.img;
+  document.getElementById('lightboxImg').alt    = g.title;
+  document.getElementById('lightboxTitle').textContent = g.title;
+  document.getElementById('lightboxDesc').textContent  = g.desc || '';
+  document.getElementById('lightboxFecha').textContent = g.fecha ? '📅 ' + g.fecha : '';
+  document.getElementById('lightboxCounter').textContent =
+    _lbGallery.length > 1 ? (_lbIndex+1) + ' / ' + _lbGallery.length : '';
+  // show/hide nav arrows
+  const show = _lbGallery.length > 1;
+  document.querySelector('.lightbox-prev').style.display = show ? '' : 'none';
+  document.querySelector('.lightbox-next').style.display = show ? '' : 'none';
+}
+
+function _lbKey(e){
+  if(e.key==='Escape')     closeLightbox({});
+  if(e.key==='ArrowRight') lightboxNav(1);
+  if(e.key==='ArrowLeft')  lightboxNav(-1);
+}
 
 /* ══ EXCEL EXPORT ═══════════════════════════════════════ */
 function exportarExcel(){
